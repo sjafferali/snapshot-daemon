@@ -1,0 +1,336 @@
+#! /bin/bash
+
+arg1=$1
+arg2=$2
+arg3=$3
+arg4=$4
+
+log_dir=/root/snapshot
+if [ -z $arg2 ]
+then
+	arg2=summ
+fi
+
+
+log_start () {
+
+#############################
+#Specify log directory
+log_dir=/root/snapshot
+
+
+
+#############################
+#Declaring static variables
+cpu_threshold=1
+adj_cpu_thresh=$(echo $cpu_threshold*100 | bc -l|cut -d\. -f1)
+disk_drives=$(ls /dev/ | egrep -o -e '[sh]{1}d[a-z]{1}' | sort | uniq)
+mem_total=$(free -m| awk '/Mem/ {print $2}')
+mem_threshold=$(echo $mem_total*0.75 | bc -l | cut -d. -f1)
+sem_array_max=$(ipcs -sql | awk '/max\ number\ of\ arrays/ {print $6}')
+log_limit=10000000
+log_size=0
+
+
+#############################
+#Starting the loop for the script and setting its termination condition.
+while [[ ($log_size -le $log_limit) ]]
+do
+
+if [[ ! -z $log_dir ]]
+then
+	find $log_dir/logs -maxdepth 2 -mindepth 2 -type d -mtime +5 -exec rm -fr {} \;
+fi
+
+LOG=$log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/summ
+mkdir -p $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`
+touch $log_dir/`date +"%m"`
+date +"%m-%d-%Y_%T" | awk -F":" '{print$1":"$2}' >> $log_dir/`date +"%m"`
+#ps auxf > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/ps
+netstat -tunap > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/netstat
+mysqladmin processlist  > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/sql
+/usr/sbin/httpd status > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/http
+iostat > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/io
+/usr/sbin/iotop -b -n 1 >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/iops
+
+if [[ -f /proc/user_beancounters ]]
+then
+	cat /proc/user_beancounters >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/beans
+fi
+
+if [[ `cat /etc/redhat-release  | grep Cloud | wc -l` -eq 1 ]]
+then
+	/usr/sbin/dbtop -c >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/dbtop
+	/usr/sbin/lveps >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/lveps
+fi
+
+#############################
+#Generationg data files from dynamic sources for use in the script.
+ps auxcS | awk '{if (($3 > 0 && $3 != "%CPU") || ($5 > 0 && $5 != "VSZ")) print $11" "$3" "$5}' > /tmp/ps.check.results
+ps auxcS | awk '{if (($4 > 0 && $4 != "%MEM") || ($5 > 0 && $5 != "VSZ")) print $11" "$4" "$5}' > /tmp/mem.check.results
+netstat -nut | awk '{if ($1 ~ /tcp/ || $1 ~ /udp/) print $0}' > /tmp/network.check.results
+vmstat 1 5 > /tmp/vmstat.results
+
+#############################
+#Declaring dynamic variables.
+cpu_load=`cat /proc/loadavg | awk -F"." '{print$1}'`
+adj_cpu_load=$(echo $cpu_load*100 | bc -l|cut -d\. -f1)
+mem_free=$(free -m| awk '/Mem/ {print $4}')
+mem_buff_used=$(free -m | awk '/\-\/\+/ {print $3}')
+tcp_conn=$(egrep -e '^tcp' /tmp/network.check.results | wc -l)
+udp_conn=$(egrep -e '^udp' /tmp/network.check.results | wc -l)
+total_conn=$(wc -l /tmp/network.check.results | cut -d\  -f1)
+apache_curr=$(egrep -o -e '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*:[0-9]*[ ]*[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*:[0-9]*' /tmp/network.check.results | awk '{print$1":"$2}' |awk 'BEGIN {FS = ":"} {if ($2 == 80) {print $3}}' | wc -l)
+sem_array_curr=$(ipcs -u | awk '/used\ arrays/ {print $4}')
+sem_curr=$(ipcs -u | awk '/allocated\ semaphores/ {print $4}')
+mess_queue=$(ipcs -u | awk '/allocated\ queues/ {print $4}')
+mess_size=$(ipcs -u | awk '/used\ space/ {print $4}')
+iowait=$(awk '/[[:digit:]]/ {sum += $16} END {sum /= 5} END {print sum}' /tmp/vmstat.results | cut -d\. -f1)
+cpuidle=$(awk '/[[:digit:]]/ {sum += $15} END {sum /= 5} END {print sum}' /tmp/vmstat.results | cut -d\. -f1)
+free_mem_total=$(free -m | awk '/\-\/\+/ {print $4}')
+
+echo -e "\nDate: "`date +"%x %r"` >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/ps
+echo "Load: "`cat /proc/loadavg` >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/ps
+echo "Free Memory: $mem_free MB ($free_mem_total MB)" >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/ps
+echo -e "CPU --- id:$cpuidle% - wa:$iowait% \n" >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/ps
+ps auxf >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/ps
+
+#############################
+#Timestamping the test
+echo -e "This test was executed at:"\\n`date`\\n"--------------" >> $LOG
+
+#############################
+#Display load, load threshold, and cpu usage if threshold is exceeded.
+echo -e "System load is "$cpu_load"."\\n"Load threshold is "$cpu_threshold"." >> $LOG
+if [[ ($adj_cpu_load -le $adj_cpu_thresh) ]];
+then
+	echo -e "Load is within bounds."\\n"--------------" >> $LOG;
+else
+	echo -e "Load threshold has been exceeded."\\n"Offending processes are:" >> $LOG
+	for i in $(awk '{print $1}' /tmp/ps.check.results| sort | uniq) ; do awk --assign i=$i '{if ($1 == i) {sum += $2}} END {if ($2 != "" && sum != 0) print i" is using "sum"% of the CPU."}' /tmp/ps.check.results ; done | sort -k4 -n >> $LOG
+	echo "--------------" >> $LOG
+fi
+
+#############################
+# Check and Display IOWait if IOWait is greater than 50%.
+echo "Current IOWait for the system is "$iowait"%." >> $LOG
+if [[ ($iowait -gt 20) ]]
+then
+	echo -e "IOWait has exceeded 20%."\\n"The IOWait for your drives is as follows:" >> $LOG
+	for i in $disk_drives
+	do
+		iostat -xk $i 1 10 | egrep $i | awk '{sum += $12} END {sum /= 10} END {if (sum > 0) {print "Drive "$1" is at "sum"% utilization."}}'
+	done >> $LOG
+	echo "--------------" >> $LOG;
+else
+	echo -e "IOWait is within limits."\\n"--------------" >> $LOG;
+fi
+
+#############################
+#Determines and prints the total memory used by each process if the process displays more than 0% memory usage in ps.
+echo -e "Memory used is "$mem_buff_used" megabytes."\\n"Memory threshold is "$mem_threshold" megabytes." >> $LOG
+if [[ ($mem_buff_used -lt $mem_threshold) ]];
+then
+	echo -e "Memory is fine."\\n"--------------" >> $LOG;
+else
+	echo -e "Memory threshold exceeded."\\n"The following data is calculated from the virtual memory used per process."\\n"Offending Processes are:" >> $LOG
+	for i in $(cat /tmp/mem.check.results | awk '{print $1}' | sort | uniq)
+	do
+		awk --assign i=$i '{if ($1 == i) {sum += $2}} END {if ($2 != "" && sum != 0) print i" is using "sum"% of the RAM."}' /tmp/mem.check.results
+	done | sort -k4 -n >> $LOG
+	echo "--------------" >> $LOG;
+fi
+
+
+#############################
+#Determines the state of both semaphores and the message queue
+echo "The maximum number of semaphore arrays is $sem_array_max." >> $LOG
+if [[ ($sem_array_curr -gt 0) ]]
+then
+	echo -e "There are "$sem_curr" semaphores in use."\\n"The owners of the semaphores in use are as follows:"\\n`ipcs -s | awk '{print$3}' | egrep -v "owner|Array" |egrep -e [[:alpha:]]` >> $LOG
+else
+	echo -e "There are no semaphores currently in use."\\n"--------------" >> $LOG;
+fi
+echo -e "There are "$mess_queue" system messages queued."\\n"The size of the system message queue buffer is "$mess_size" bytes."\\n"--------------" >> $LOG;
+
+#############################
+#Outputting the current entwork statistics.
+echo "There are "$total_conn" network connections." >> $LOG
+if [[ ($tcp_conn -eq $total_conn) ]];
+then
+	echo "All connections are currently TCP connections." >> $LOG;
+else
+	if [[ ($udp_conn -eq $total_conn) ]];
+	then
+		echo "All connections are currently UDP connections." >> $LOG;
+	else
+		echo "There are "$tcp_conn" TCP connections and "$udp_conn" UDP connections." >> $LOG;
+	fi
+fi
+
+if [[ ($total_conn -lt 400) ]]
+then
+	awk '/\:/ {if ($6 != "")print $4}' /tmp/network.check.results | egrep -o -e '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\:[0-9]*' | awk -F: '{print $2}' | sort | uniq -c | awk '{if ($1>1) {print "There are "$1" connections to port "$2"."}}' | sort -k3 -n >> $LOG
+	echo "--------------" >> $LOG;
+else
+	awk '/\:/ {if ($6 != "")print $6}' /tmp/network.check.results |sort |uniq -c | awk '{print "There are "$1" connections in state "$2"."}' | sort -n >> $LOG
+	echo "--------------" >> $LOG
+	awk '/\:/ {if ($6 != "")print $4":"$6}' /tmp/network.check.results | egrep -o -e '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\:[0-9]*\:[A-Z_]*'| awk -F: '{print $2" "$3}' | sort | uniq -c | awk '{if ($1>1) {print "There are "$1" connections to port "$2" in state "$3"."}}' | sort -k7,3 -n >> $LOG
+	echo "--------------" >> $LOG;
+fi
+
+echo -e "There are "$apache_curr" connections to Apache at this time."\\n"--------------" >> $LOG
+egrep -o -e '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*:[0-9]*[ ]*[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*:[0-9]*' /tmp/network.check.results | awk '{print$1":"$2}' |awk 'BEGIN {FS = ":"} {if ($2 == 80) {print $3}}' | sort | uniq -c | awk '{if ($1 > 10) print $2" is connected to Apache "$1" times."}' | sort -k6 -n >> $LOG
+echo -e "--------------"\\n >> $LOG;
+
+#############################
+#Removing data files.
+rm -f /tmp/network.check.results
+rm -f /tmp/ps.check.results
+rm -f /tmp/mem.check.results
+rm -f /tmp/vmstat.results
+
+#############################
+#Updating the log_size variable, and sleeping the test for 1 minute
+sleep 60
+
+done;
+}
+
+
+show_log_date () {
+log=$log_dir/logs/`echo $arg2 | awk -F"-" '{print$1"/"$2}'`/`echo $arg3`
+if [ -z $arg4 ]
+then
+	cat $log/summ
+	exit ;
+fi
+
+if [ -f $log/$arg4 ]
+then
+	cat $log/$arg4
+else
+	echo $arg4 log not found. Available logs are:
+	find $log -type f
+fi
+
+
+}
+
+
+show_log_time () {
+log=$log_dir/logs/`date +"%m"`/`date +"%d"`/`echo $arg2`
+if [ -z $arg3 ]
+then
+	cat $log/summ
+	exit 0
+fi
+
+if [ -f $log/$arg3 ]
+then
+	cat $log/$arg3
+else
+	echo $arg3 log not found. Available logs are:
+	find $log -type f
+fi
+
+}
+
+
+show_help () {
+echo '
+SNAPSHOT
+
+Usage: snapshot [-d|-t] [date|time] [http|ps|netstat|sql]
+
+
+Options:
+==========================
+-d: Provide date and time in format "01-08 21:16"
+-t: Assumes today and need to provide time in format "21:16"
+-i: Install snapshot
+
+Logs:
+==========================
+summ: Summary of all info. Default if left blank.
+http: Httpd information.
+ps: Process information.
+netstat: Connections information.
+sql: MySQL information.
+io: Iostats information.
+iops: Process level IO information.
+
+VPS Specific
+==========================
+beans: /proc/user_beancounters output
+
+CloudLinux Specific
+==========================
+dbtop: dbtop output
+lveps: lveps output
+'
+}
+
+install_snap () {
+if [[ `rpm -qa iotop | wc -l` -eq 0 ]]
+then
+	echo "[!] Installing iotop... "
+	yum install iotop -y
+fi
+
+if [[ `rpm -qa bc | wc -l` -eq 0 ]]
+then
+	echo "[!] Installing bc... "
+	yum install bc -y
+fi
+
+if [[ `grep snapshot /var/spool/cron/root | wc -l` -eq 0 ]]
+then
+	echo -ne "[*] Adding to root crontab... "
+	echo "@reboot nohup /root/bin/snapshot -i > /dev/null 2>&1 &" >> /var/spool/cron/root
+	systemctl reload crond
+fi
+
+if [[ $arg2 = "--force" ]]
+then
+	echo -n "[*] Starting snapshot in background... "
+	nohup /root/bin/snapshot cron  > /dev/null 2>&1 &
+	echo Done
+	exit 0
+fi
+
+if [[ -z `ps aux | grep snapshot | grep -v grep | grep -v "/root/bin/snapshot -i"` ]]
+then
+	if [[ ! -d $log_dir/logs ]]
+	then
+		mkdir -vp $log_dir/logs
+	fi
+	echo -n "[*] Starting snapshot in background... "
+	nohup /root/bin/snapshot cron  > /dev/null 2>&1 &
+	echo Done
+else
+	echo
+	echo "[!] Existing process found."
+	ps aux | grep snapshot | grep -v grep | grep -v "/root/bin/snapshot -i"
+	echo
+	echo Use --force to install anyways.
+fi
+
+}
+
+
+case $arg1 in
+	cron )
+	log_start ;;
+	"-t" )
+	show_log_time ;;
+	"-h" )
+	show_help ;;
+	"-d" )
+	show_log_date ;;
+	"-i" )
+	install_snap ;;
+	"" )
+	echo "snapshot [-d|-t|-i] [time|date] [log]" ;
+	echo "snapshot -h for help" ;;
+esac
