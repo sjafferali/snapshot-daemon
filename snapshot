@@ -46,10 +46,8 @@ LOG=$log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"
 mkdir -p $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`
 touch $log_dir/`date +"%m"`
 date +"%m-%d-%Y_%T" | awk -F":" '{print$1":"$2}' >> $log_dir/`date +"%m"`
-#ps auxf > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/ps
+ps auxf > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/ps
 netstat -tunap > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/netstat
-mysqladmin processlist  > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/sql
-/usr/sbin/httpd status > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/http
 iostat > $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/io
 /usr/sbin/iotop -b -n 1 >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/iops
 
@@ -58,11 +56,6 @@ then
 	cat /proc/user_beancounters >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/beans
 fi
 
-if [[ `cat /etc/redhat-release  | grep Cloud | wc -l` -eq 1 ]]
-then
-	/usr/sbin/dbtop -c >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/dbtop
-	/usr/sbin/lveps >> $log_dir/logs/`date +"%m"`/`date +"%d"`/`date +"%T" | awk -F":" '{print$1":"$2}'`/lveps
-fi
 
 #############################
 #Generationg data files from dynamic sources for use in the script.
@@ -253,36 +246,15 @@ Options:
 Logs:
 ==========================
 summ: Summary of all info. Default if left blank.
-http: Httpd information.
 ps: Process information.
 netstat: Connections information.
-sql: MySQL information.
 io: Iostats information.
 iops: Process level IO information.
 
-VPS Specific
-==========================
-beans: /proc/user_beancounters output
-
-CloudLinux Specific
-==========================
-dbtop: dbtop output
-lveps: lveps output
 '
 }
 
 install_snap () {
-if [[ `rpm -qa iotop | wc -l` -eq 0 ]]
-then
-	echo "[!] Installing iotop... "
-	yum install iotop -y
-fi
-
-if [[ `rpm -qa bc | wc -l` -eq 0 ]]
-then
-	echo "[!] Installing bc... "
-	yum install bc -y
-fi
 
 if [[ `grep snapshot /var/spool/cron/root | wc -l` -eq 0 ]]
 then
