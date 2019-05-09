@@ -260,7 +260,7 @@ if [[ `grep snapshot /var/spool/cron/root | wc -l` -eq 0 ]]
 then
 	echo -ne "[*] Adding to root crontab... "
 	echo "@reboot nohup /root/bin/snapshot -i > /dev/null 2>&1 &" >> /var/spool/cron/root
-	systemctl reload crond
+	service cron restart
 fi
 
 if [[ $arg2 = "--force" ]]
